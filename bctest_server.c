@@ -90,7 +90,55 @@ void saygoodbye_to(char *name)
     fprintf(stderr, "%s, saygoodbye_to name = %s, cnt = %d\n", __FILE__, name, cnt++);
 }
 
-int svcmgr_handler(struct binder_state *bs,
+int hello_handler(struct binder_state *bs,
+                  struct binder_transaction_data *txn,
+                  struct binder_io *msg,
+                  struct binder_io *reply)
+{
+    u_int16_t *s;
+    size_t len;
+    uint32_t handle;
+    uint32_t strict_policy;
+    char name[32];
+    int i;
+
+    fprintf(stderr, "%s, hello txn->target.handle = %d\n", __FILE__, txn->target.handle);
+
+    if (txn->code == PING_TRANSACTION)
+    {
+        fprintf(stderr, "txn->code == PING_TRANSACTION\n");
+        return 0;
+    }
+
+    strict_policy = bio_get_uint32(msg);
+
+    switch(txn->code) {
+    case HELLO_SVR_CMD_SAYHELLO:
+        sayhello();
+        break;
+    case HELLO_SVR_CMD_SAYHELLO_TO:
+        s = bio_get_string16(msg, &len);
+        if (s == NULL) {
+            return -1;
+        }
+
+        for(i = 0; i < len; i++)
+            name[i] = s[i];
+        name[i] = '\0';
+
+        sayhello_to(name);
+
+        bio_put_uint32(reply, 0);
+        break;
+    default:
+        fprintf(stderr, "unknow txn->code\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int goodbye_handler(struct binder_state *bs,
                    struct binder_transaction_data *txn,
                    struct binder_io *msg,
                    struct binder_io *reply)
@@ -107,7 +155,7 @@ int svcmgr_handler(struct binder_state *bs,
 
 //    if (txn->target.handle != svcmgr_handle)
 //        return -1;
-    fprintf(stderr, "%s, txn->target.handle = %d\n", __FILE__, txn->target.handle);
+    fprintf(stderr, "%s, goodbye txn->target.handle = %d\n", __FILE__, txn->target.handle);
 
     if (txn->code == PING_TRANSACTION)
     {
@@ -142,23 +190,6 @@ int svcmgr_handler(struct binder_state *bs,
 //    }
 
     switch(txn->code) {
-    case HELLO_SVR_CMD_SAYHELLO:
-        sayhello();
-        break;
-    case HELLO_SVR_CMD_SAYHELLO_TO:
-        s = bio_get_string16(msg, &len);
-        if (s == NULL) {
-            return -1;
-        }
-
-        for(i = 0; i < len; i++)
-            name[i] = s[i];
-        name[i] = '\0';
-
-        sayhello_to(name);
-
-        bio_put_uint32(reply, 0);
-        break;
     case HELLO_SVR_CMD_SAYGOODBYE:
         saygoodbye();
         break;
@@ -185,6 +216,24 @@ int svcmgr_handler(struct binder_state *bs,
     return 0;
 }
 
+int svcmgr_handler(struct binder_state *bs,
+                   struct binder_transaction_data *txn,
+                   struct binder_io *msg,
+                   struct binder_io *reply)
+{
+    int (*handle) (struct binder_state *bs,
+                   struct binder_transaction_data *txn,
+                   struct binder_io *msg,
+                   struct binder_io *reply);
+
+    handle = (int (*) (struct binder_state *bs,
+                           struct binder_transaction_data *txn,
+                           struct binder_io *msg,
+                           struct binder_io *reply))txn->target.ptr;
+    return handle(bs, txn, msg, reply);
+
+}
+
 //unsigned token;
 
 int main(int argc, char **argv)
@@ -201,14 +250,14 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    ret = svcmgr_publish(bs, svcmgr, "hello", (void *)100);
+    ret = svcmgr_publish(bs, svcmgr, "hello", hello_handler);
     if(ret)
     {
         fprintf(stderr, "publish hello err\n");
         return -1;
     }
 
-    ret = svcmgr_publish(bs, svcmgr, "goodbye", (void *)101);
+    ret = svcmgr_publish(bs, svcmgr, "goodbye", goodbye_handler);
     if(ret)
     {
         fprintf(stderr, "publish goodbye err\n");

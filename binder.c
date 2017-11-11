@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <pthread.h>
 #include "binder.h"
 
 #define MAX_BIO_SIZE (1 << 30)
@@ -210,6 +211,54 @@ void binder_send_reply(struct binder_state *bs,
     binder_write(bs, &data, sizeof(data));
 }
 
+struct start_routine_arg
+{
+    struct binder_state *bs;
+    binder_handler func;
+};
+
+static void *start_routine(void *arg)
+{
+    //same as binder_loop()
+    struct start_routine_arg *btd= arg;
+
+    int res;
+    struct binder_write_read bwr;
+    uint32_t readbuf[32];
+
+    bwr.write_size = 0;
+    bwr.write_consumed = 0;
+    bwr.write_buffer = 0;
+
+    readbuf[0] = BC_REGISTER_LOOPER;
+    binder_write(btd->bs, readbuf, sizeof(uint32_t));
+
+    for (;;) {
+        bwr.read_size = sizeof(readbuf);
+        bwr.read_consumed = 0;
+        bwr.read_buffer = (uintptr_t) readbuf;
+
+        res = ioctl(btd->bs->fd, BINDER_WRITE_READ, &bwr);
+
+        if (res < 0) {
+            ALOGE("binder_loop: ioctl failed (%s)\n", strerror(errno));
+            break;
+        }
+
+        res = binder_parse(btd->bs, 0, (uintptr_t) readbuf, bwr.read_consumed, btd->func);
+        if (res == 0) {
+            ALOGE("binder_loop: unexpected reply?!\n");
+            break;
+        }
+        if (res < 0) {
+            ALOGE("binder_loop: io error %d %s\n", res, strerror(errno));
+            break;
+        }
+    }
+
+    return NULL;
+}
+
 int binder_parse(struct binder_state *bs, struct binder_io *bio,
                  uintptr_t ptr, size_t size, binder_handler func)
 {
@@ -236,6 +285,17 @@ int binder_parse(struct binder_state *bs, struct binder_io *bio,
 #endif
             ptr += sizeof(struct binder_ptr_cookie);
             break;
+        case BR_SPAWN_LOOPER: {
+            pthread_t thread;
+            struct start_routine_arg btd;
+
+            btd.bs = bs;
+            btd.func = func;
+
+            pthread_create(&thread, NULL, start_routine, (void *)&btd);
+
+            break;
+        }
         case BR_TRANSACTION: {
             struct binder_transaction_data *txn = (struct binder_transaction_data *) ptr;
             if ((end - ptr) < sizeof(*txn)) {
@@ -376,6 +436,11 @@ fail:
     memset(reply, 0, sizeof(*reply));
     reply->flags |= BIO_F_IOERROR;
     return -1;
+}
+
+void binder_set_maxthreads(struct binder_state *bs, int threads)
+{
+    ioctl(bs->fd, BINDER_SET_MAX_THREADS, &threads);
 }
 
 void binder_loop(struct binder_state *bs, binder_handler func)

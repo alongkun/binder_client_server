@@ -264,6 +264,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
+    binder_set_maxthreads(bs, 10);
     binder_loop(bs, svcmgr_handler);
 
     /*

@@ -70,6 +70,8 @@ void binder_release(struct binder_state *bs, uint32_t target);
 
 void binder_link_to_death(struct binder_state *bs, uint32_t target, struct binder_death *death);
 
+void binder_set_maxthreads(struct binder_state *bs, int threads);
+
 void binder_loop(struct binder_state *bs, binder_handler func);
 
 int binder_become_context_manager(struct binder_state *bs);
